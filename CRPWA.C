@@ -99,7 +99,7 @@ int main(int argc, char *argv[])
 		forAll(Y,i)
 		{
 			rr_[i] = chemistry.RR(i);
-			if(selectedSpecies.found(Y[i].name()))
+			if(selectedSpecies.found(Y[i].name()) || !args.optionFound("species"))
 			{
 				rr_[i].write();
 			}
@@ -116,7 +116,7 @@ int main(int argc, char *argv[])
 			label lhsn = -1;
 			forAll(Y,n)
 			{ 
-				if(selectedSpecies.found(Y[n].name()))
+				if(selectedSpecies.found(Y[n].name()) || !args.optionFound("species"))
 				{
 					scalar countl = 0.;
 					scalar countr = 0.;
@@ -174,7 +174,7 @@ int main(int argc, char *argv[])
 		//***********************************************//
 		forAll(Y,n)
 		{   
-			if(selectedSpecies.found(Y[n].name()))
+			if(selectedSpecies.found(Y[n].name()) || !args.optionFound("species"))
 			{
 				autoPtr<OFstream> speciesNamePtr;
 				if (speciesNamePtr.empty())
