@@ -46,7 +46,7 @@ forAll(Y,i)
 
 forAll(reactions,m)
 {
-	word name("SH_"  + reactions[m].name());
+	word name("SH_r" +Foam::name(m));
 	SH_.set
 	(
 		m,
@@ -79,7 +79,7 @@ forAll(reactions,m)
 			if (n == reactions[m].lhs()[s].index  )
 			{
 				I++;
-				word name( Y[n].name() + "_" + reactions[m].name());
+				word name( Y[n].name() + "_r" +Foam::name(m));
 				RR_.set
 				(
 					I,
@@ -105,7 +105,7 @@ forAll(reactions,m)
 			if (n == reactions[m].rhs()[s].index )
 			{
 				I++;
-				word name( Y[n].name() + "_" + reactions[m].name());
+				word name( Y[n].name() + "_r" +Foam::name(m));
 				RR_.set
 				(
 					I,

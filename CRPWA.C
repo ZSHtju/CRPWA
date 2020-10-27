@@ -34,173 +34,207 @@ Description
 \*---------------------------------------------------------------------------*/
 
 #include "fvCFD.H"
-//#include "psiChemistryModel.H"
 #include "psiReactionThermo.H"
 #include "BasicChemistryModel.H"
 #include "reactingMixture.H"
 #include "chemistrySolver.H"
 #include "thermoPhysicsTypes.H"
-//#include "basicMultiComponentMixture.H"
 #include "basicSpecieMixture.H"
-
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 int main(int argc, char *argv[])
 {
-    #include "setRootCase.H"
-    #include "createTime.H"
-    #include "createMesh.H"
-    #include "createFields.H"
-    #include "createNewFields.H"
-
-	volScalarField chemistryhsSource
+	timeSelector::addOptions();
+	argList::addOption
 	(
-		IOobject
-		(
-			"chemistryhsSource",
-			runTime.timeName(),
-			mesh,
-			IOobject::NO_READ,
-			IOobject::AUTO_WRITE
-		),
-		mesh,
-		dimensionedScalar("chemistryhsSource", dimEnergy/dimTime/dimVolume, 0.0)
+		"species",
+		"list",
+		"specify a list of species to be processed, e.g. '( O2 CH4 H2)' -"
+		"otherwise all species will be processed"
+	);
+	argList::addBoolOption
+	(
+		"noElementaryReaction",
+		"No output for elementary reaction information, only species reaction rate"
 	);
 	
-	
-	thermo.correct();
-	chemistry.calculate();
-	chemistryhsSource = chemistry.Qdot();
-	chemistryhsSource.write();
-	forAll(Y,i)
+    #include "addRegionOption.H"
+    #include "setRootCase.H"
+    #include "createTime.H"
+
+	HashSet<word> selectedSpecies;
+	if(args.optionFound("species"))
 	{
-		rr_[i] = chemistry.RR(i);
-		rr_[i].write();
+		args.optionLookup("species" )() >> selectedSpecies;
 	}
+	const bool noElementaryReaction = args.optionFound("noElementaryReaction");
+    instantList timeDirs = timeSelector::select0(runTime, args);
+	#include "postProcess.H"
+	forAll(timeDirs, timeI)
+	{
+		#include "createMesh.H"
+		#include "createFields.H"
+		#include "createNewFields.H"
+
+		volScalarField chemistryhsSource
+		(
+			IOobject
+			(
+				"chemistryhsSource",
+				runTime.timeName(),
+				mesh,
+				IOobject::NO_READ,
+				IOobject::AUTO_WRITE
+			),
+			mesh,
+			dimensionedScalar("chemistryhsSource", dimEnergy/dimTime/dimVolume, 0.0)
+		);
+		
+		
+		thermo.correct();
+		chemistry.calculate();
+		chemistryhsSource = chemistry.Qdot();
+		chemistryhsSource.write();
+		forAll(Y,i)
+		{
+			rr_[i] = chemistry.RR(i);
+			if(selectedSpecies.found(Y[i].name()))
+			{
+				rr_[i].write();
+			}
+		}
        
 
 //**************************************************************//
 
 
-	label II = 0;
-	forAll(reactions,m)
-	{   
-		const Reaction<gasHThermoPhysics>& R = reactions[m];
-		label lhsn = -1;
-		forAll(Y,n)
-		{ 
-			scalar countl = 0.;
-			scalar countr = 0.;
-			forAll(R.lhs(),s)
-			{
-
-			if (n == R.lhs()[s].index  )
-			{
-				II++;
-				const label a = m;
-				const label b = n;
-				RR_[II] =  chemistry.calculateRR(a,b);   
-				RR_[II].write();
-				const scalar sl = R.lhs()[s].stoichCoeff;
-				countl -= sl; 
-				lhsn = n;     
-				}
-				}
-
-				forAll(R.rhs(),s)
+		label II = 0;
+		forAll(reactions,m)
+		{   
+			const Reaction<gasHThermoPhysics>& R = reactions[m];
+			label lhsn = -1;
+			forAll(Y,n)
+			{ 
+				if(selectedSpecies.found(Y[n].name()))
 				{
-					if (n == R.rhs()[s].index )
+					scalar countl = 0.;
+					scalar countr = 0.;
+					forAll(R.lhs(),s)
+					{
+
+					if (n == R.lhs()[s].index  )
 					{
 						II++;
 						const label a = m;
 						const label b = n;
-						RR_[II] =  chemistry.calculateRR(a,b);  
+						RR_[II] =  chemistry.calculateRR(a,b);   
 						RR_[II].write();
-						const scalar sr = R.rhs()[s].stoichCoeff;
-						countr += sr;             
+						const scalar sl = R.lhs()[s].stoichCoeff;
+						countl -= sl; 
+						lhsn = n;     
+						}
+						}
+
+						forAll(R.rhs(),s)
+						{
+							if (n == R.rhs()[s].index )
+							{
+								II++;
+								const label a = m;
+								const label b = n;
+								RR_[II] =  chemistry.calculateRR(a,b);  
+								RR_[II].write();
+								const scalar sr = R.rhs()[s].stoichCoeff;
+								countr += sr;             
+							}
+						}
+						if (countl != 0 || countr != 0)
+						{
+							const label c = m;
+							const label d = n;
+							const DimensionedField<scalar, volMesh> TTT =  chemistry.calculateRR(c,d);
+							SH_[m] -= TTT*hcSp[n]*(countl+countr);
+						}
 					}
-				}
-				if (countl != 0 || countr != 0)
-				{
-					const label c = m;
-					const label d = n;
-					const DimensionedField<scalar, volMesh> TTT =  chemistry.calculateRR(c,d);
-					SH_[m] -= TTT*hcSp[n]*(countl+countr);
-				}
-
 			}
-		const label e = m;
-		const label f = lhsn;
-		const DimensionedField<scalar, volMesh> TTTT =  chemistry.calculateRR(e,f)/specieData[f].W();                         
-		SH_[m].write();
-	}
-
-
-
-
-
-	//***********************************************//
-	forAll(Y,n)
-	{   
-		autoPtr<OFstream> speciesNamePtr;
-		if (speciesNamePtr.empty())
-		{
-			// File update
-			fileName Average_p;
-			word name_ = "speciesNamePtr";
-
-			// Open new file at start up
-			speciesNamePtr.reset(new OFstream(Y[n].name()));	 
+			//const label e = m;
+			//const label f = lhsn;
+			//const DimensionedField<scalar, volMesh> TTTT =  chemistry.calculateRR(e,f)/specieData[f].W();       
+			if(!noElementaryReaction)
+			{
+				SH_[m].write();
+			}
 		}
 
-		forAll(reactions,m)
-		{ 
-			const Reaction<gasHThermoPhysics>& R = reactions[m];
-			scalar countl = 0.;
-			scalar countr = 0.;
-			forAll(R.lhs(),s)
+
+
+
+
+		//***********************************************//
+		forAll(Y,n)
+		{   
+			if(selectedSpecies.found(Y[n].name()))
 			{
-				if (n == R.lhs()[s].index  )
+				autoPtr<OFstream> speciesNamePtr;
+				if (speciesNamePtr.empty())
 				{
-					const scalar sl = R.lhs()[s].stoichCoeff;
-					countl -= sl;       
+					// File update
+					fileName output;
+					word name_ = "speciesNamePtr";
+
+					// Open new file at start up
+					speciesNamePtr.reset(new OFstream(Y[n].name()));	 
 				}
-			}
 
-			forAll(R.rhs(),s)
-			{
-				if (n == R.rhs()[s].index )
-				{
-					const scalar sr = R.rhs()[s].stoichCoeff;
-					countr += sr;            
-				}
-			}
-
-			if (countl != 0 || countr != 0)
-			{
-				const label e = m;
-				const label f = n;
-				const DimensionedField<scalar, volMesh> SS = chemistry.calculateRR(e,f);
-				DimensionedField<scalar, volMesh>  SSS = SS*(countl+countr);
-
-				forAll(mesh.C(),celli)
-				{
-					if(celli == 0)
+				forAll(reactions,m)
+				{ 
+					const Reaction<gasHThermoPhysics>& R = reactions[m];
+					scalar countl = 0.;
+					scalar countr = 0.;
+					forAll(R.lhs(),s)
 					{
-						speciesNamePtr()<< reactions[m];
-						speciesNamePtr()<< SSS[celli]  << endl;
+						if (n == R.lhs()[s].index  )
+						{
+							const scalar sl = R.lhs()[s].stoichCoeff;
+							countl -= sl;       
+						}
 					}
-					else
-					{ 
-						speciesNamePtr()<<  SSS[celli] << endl; 
+
+					forAll(R.rhs(),s)
+					{
+						if (n == R.rhs()[s].index )
+						{
+							const scalar sr = R.rhs()[s].stoichCoeff;
+							countr += sr;            
+						}
+					}
+
+					if (countl != 0 || countr != 0)
+					{
+						//const label e = m;
+						//const label f = n;
+						speciesNamePtr() << m << tab << reactions[m] << endl;
+						//const DimensionedField<scalar, volMesh> SS = chemistry.calculateRR(e,f);
+						//DimensionedField<scalar, volMesh>  SSS = SS*(countl+countr);
+
+	/* 					forAll(mesh.C(),celli)
+						{
+							if(celli == 0)
+							{
+								speciesNamePtr()<< reactions[m];
+								speciesNamePtr()<< SSS[celli]  << endl;
+							}
+							else
+							{ 
+								speciesNamePtr()<<  SSS[celli] << endl; 
+							}
+						} */
 					}
 				}
 			}
-
 		}
-	}
-
+}
 //*****************************************************//
 
 	Info<< "ExecutionTime = " << runTime.elapsedCpuTime() << " s"
