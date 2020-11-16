@@ -109,13 +109,13 @@ int main(int argc, char *argv[])
 //**************************************************************//
 
 
-		label II = 0;
+		//label II = 0;
 		forAll(reactions,m)
 		{   
 			const Reaction<gasHThermoPhysics>& R = reactions[m];
 			forAll(mesh.C(),celli)
 			{
-				II = 0;
+				label II = indexStart[m];
 				scalar pf,cf,pr,cr;
 				label lRef,rRef;
 				scalar Ti = thermo.T()()[celli];
@@ -157,9 +157,10 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		II = 0;
+		//II = 0;
 		forAll(reactions,m)
 		{   
+			label II = indexStart[m];
 			const Reaction<gasHThermoPhysics>& R = reactions[m];	
 			forAll(Y,n)
 			{ 

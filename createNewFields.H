@@ -2,6 +2,7 @@
 label N = Y.size();
 label M = reactions.size();
 label NM = N*M; 
+labelList indexStart(M,0);
 
 PtrList<DimensionedField<scalar, volMesh>> RR_(NM);//reaction rate for species n in reaction m
 PtrList<DimensionedField<scalar, volMesh>> SH_(M);//enthorpy source in each reaction
@@ -72,6 +73,7 @@ forAll(reactions,m)
 label I = 0;
 forAll(reactions,m)
 {
+	indexStart[m] = I;
 	forAll(Y,n)
 	{ 
 		forAll(reactions[m].lhs(),s)
