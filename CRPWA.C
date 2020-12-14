@@ -91,7 +91,7 @@ int main(int argc, char *argv[])
 		args.optionLookup("pathFluxSpecies" )() >> pathFluxSpecies;
 	}
 	const bool noElementaryReaction = args.optionFound("noElementaryReaction");
-    instantList timeDirs = timeSelector::select0(runTime, args);
+	instantList timeDirs = timeSelector::select0(runTime, args);
 	#include "postProcess.H"
 	// output the average heat release rate of each elementary reaction
 	OFstream  HRROutput( "log.Reactions");
@@ -113,6 +113,10 @@ int main(int argc, char *argv[])
 			{
 				cellID[i] = mesh.findCell(positions[i]);
 			}
+		}
+		else
+		{
+			cellID.setSize(1,-1);
 		}
 	
 		if(timeIndex == 1)
@@ -159,12 +163,8 @@ int main(int argc, char *argv[])
 				rr_[i].write();
 			}
 		}
-       
 
 //**************************************************************//
-
-
-		//label II = 0;
 		forAll(reactions,m)
 		{   
 			const Reaction<gasHThermoPhysics>& R = reactions[m];
@@ -184,13 +184,13 @@ int main(int argc, char *argv[])
 	
 				forAll(Y,n)
 				{ 
-					if(reactionRateSpecies.found(Y[n].name()) || !args.optionFound("reactionRateSpecies"))
+					if(reactionRateSpecies.found(Y[n].name()) || !args.optionFound("reactionRateSpecies")|| pathFluxSpecies.found(Y[n].name()) || !args.optionFound("pathFluxSpecies"))
 					{
 						forAll(R.lhs(),s)
 						{
 							if (n == R.lhs()[s].index  )
 							{
-								label II = m*(n-1)+n;
+								label II = N*m + n;
 								RR_[II][celli] -=  omegai*R.lhs()[s].stoichCoeff*specieData[n].W();   
 								SH_[m][celli] -= RR_[II][celli]*hcSp[n].value();
 							}
@@ -200,7 +200,7 @@ int main(int argc, char *argv[])
 						{
 							if (n == R.rhs()[s].index )
 							{
-								label II = m*(n-1)+n;
+								label II = N*m + n;
 								RR_[II][celli] +=  omegai*R.rhs()[s].stoichCoeff*specieData[n].W();   
 								SH_[m][celli] -= RR_[II][celli]*hcSp[n].value();
 							}
@@ -264,7 +264,7 @@ int main(int argc, char *argv[])
 					{
 						if (n == R.lhs()[s].index  )
 						{
-							label II = m*(n-1)+n;
+							label II = N*m + n;
 							scalar volIntegrateRR = 0.0;
 							forAll(mesh.C(),celli)
 							{
@@ -278,7 +278,7 @@ int main(int argc, char *argv[])
 					{
 						if (n == R.rhs()[s].index )
 						{
-							label II = m*(n-1)+n;
+							label II = N*m + n;
 							scalar volIntegrateRR = 0.0;
 							forAll(mesh.C(),celli)
 							{
@@ -298,19 +298,50 @@ int main(int argc, char *argv[])
 			{
 				forAll(cellID,i)
 				{
-					autoPtr<OFstream> speciesRRLocal;
-					if (speciesRRLocal.empty())
+					if(cellID[i] > 0)
 					{
-						// File update
-						//fileName output;
-						//word name_ = "speciesNamePtr";
+						autoPtr<OFstream> speciesRRLocal;
+						if (speciesRRLocal.empty())
+						{
+							// File update
+							//fileName output;
+							//word name_ = "speciesNamePtr";
 
-						// Open new file at start up
-						speciesRRLocal.reset(new OFstream("log.pathFlux_"+Y[n].name()+"_"+Foam::name(positions[i])));	 
-					}
-					if(timeIndex == 1)
-					{
-						speciesRRLocal() << Y[n].name() << tab; 
+							// Open new file at start up
+							speciesRRLocal.reset(new OFstream("log.pathFlux_"+Y[n].name()+"_"+Foam::name(positions[i])));	 
+						}
+						if(timeIndex == 1)
+						{
+							speciesRRLocal() << Y[n].name() << tab; 
+							forAll(reactions,m)
+							{ 
+								const Reaction<gasHThermoPhysics>& R = reactions[m];
+								forAll(R.lhs(),s)
+								{
+									if (n == R.lhs()[s].index  )
+									{
+										speciesRRLocal() << "R" << m << "[kg/s]" << tab;
+									}
+								}
+
+								forAll(R.rhs(),s)
+								{
+									if (n == R.rhs()[s].index )
+									{
+										speciesRRLocal() << "R" << m << "[kg/s]" << tab;        
+									}
+								}
+							}
+							speciesRRLocal() << endl;
+						}
+						forAll(mesh.C(),celli)
+						{
+							if(celli == cellID[i])
+							{
+								speciesRRLocal() << scientific << rr_[n][celli]*mesh.V()[celli] << tab;
+							}
+						}
+
 						forAll(reactions,m)
 						{ 
 							const Reaction<gasHThermoPhysics>& R = reactions[m];
@@ -318,7 +349,14 @@ int main(int argc, char *argv[])
 							{
 								if (n == R.lhs()[s].index  )
 								{
-									speciesRRLocal() << "R" << m << "[kg/s]" << tab;
+									label II = N*m + n;
+									forAll(mesh.C(),celli)
+									{
+										if(celli == cellID[i])
+										{
+											speciesRRLocal() << scientific << RR_[II][celli]*mesh.V()[celli] << tab;
+										}
+									}
 								}
 							}
 
@@ -326,54 +364,19 @@ int main(int argc, char *argv[])
 							{
 								if (n == R.rhs()[s].index )
 								{
-									speciesRRLocal() << "R" << m << "[kg/s]" << tab;        
+									label II = N*m + n;
+									forAll(mesh.C(),celli)
+									{
+										if(celli == cellID[i])
+										{
+											speciesRRLocal() << scientific << RR_[II][celli]*mesh.V()[celli] << tab;
+										}
+									}
 								}
 							}
 						}
 						speciesRRLocal() << endl;
 					}
-					forAll(mesh.C(),celli)
-					{
-						if(celli == cellID[i])
-						{
-							speciesRRLocal() << scientific << rr_[n][celli]*mesh.V()[celli] << tab;
-						}
-					}
-
-					forAll(reactions,m)
-					{ 
-						const Reaction<gasHThermoPhysics>& R = reactions[m];
-						forAll(R.lhs(),s)
-						{
-							if (n == R.lhs()[s].index  )
-							{
-								label II = m*(n-1)+n;
-								forAll(mesh.C(),celli)
-								{
-									if(celli == cellID[i])
-									{
-										speciesRRLocal() << scientific << RR_[II][celli]*mesh.V()[celli] << tab;
-									}
-								}
-							}
-						}
-
-						forAll(R.rhs(),s)
-						{
-							if (n == R.rhs()[s].index )
-							{
-								label II = m*(n-1)+n;
-								forAll(mesh.C(),celli)
-								{
-									if(celli == cellID[i])
-									{
-										speciesRRLocal() << scientific << RR_[II][celli]*mesh.V()[celli] << tab;
-									}
-								}
-							}
-						}
-					}
-					speciesRRLocal() << endl;
 				}
 			}
 		}
@@ -396,7 +399,7 @@ int main(int argc, char *argv[])
 					{
 						if (n == R.lhs()[s].index  )
 						{
-							label II = m*(n-1)+n;
+							label II = N*m + n;
 							RR_[II].write();
 						}
 					}
@@ -405,7 +408,7 @@ int main(int argc, char *argv[])
 					{
 						if (n == R.rhs()[s].index )
 						{
-							label II = m*(n-1)+n;
+							label II = N*m + n;
 							RR_[II].write();  
 						}
 					}
@@ -431,58 +434,61 @@ int main(int argc, char *argv[])
 		{   
 			forAll(cellID,i)
 			{
-				autoPtr<OFstream> HRLocal;
-				if (HRLocal.empty())
+				if(cellID[i] > 0)
 				{
-					// File update
-					//fileName output;
-					//word name_ = "speciesNamePtr";
+					autoPtr<OFstream> HRLocal;
+					if (HRLocal.empty())
+					{
+						// File update
+						//fileName output;
+						//word name_ = "speciesNamePtr";
 
-					// Open new file at start up
-					HRLocal.reset(new OFstream("log.Reactions_"+Foam::name(positions[i])));	 
-				}
-				if(timeIndex == 1)
-				{
-					forAll(reactions,m)
-					{ 
-						const Reaction<gasHThermoPhysics>& R = reactions[m];
-						forAll(R.lhs(),s)
-						{
-							if (n == R.lhs()[s].index  )
+						// Open new file at start up
+						HRLocal.reset(new OFstream("log.Reactions_"+Foam::name(positions[i])));	 
+					}
+					if(timeIndex == 1)
+					{
+						forAll(reactions,m)
+						{ 
+							const Reaction<gasHThermoPhysics>& R = reactions[m];
+							forAll(R.lhs(),s)
 							{
-								HRLocal() << "R" << m << "[kg/s]" << tab;
+								if (n == R.lhs()[s].index  )
+								{
+									HRLocal() << "R" << m << "[kg/s]" << tab;
+								}
+							}
+
+							forAll(R.rhs(),s)
+							{
+								if (n == R.rhs()[s].index )
+								{
+									HRLocal() << "R" << m << "[kg/s]" << tab;        
+								}
 							}
 						}
-
-						forAll(R.rhs(),s)
+						HRLocal() << endl;
+					}
+					forAll(mesh.C(),celli)
+					{
+						if(celli == cellID[i])
 						{
-							if (n == R.rhs()[s].index )
+							HRLocal() << scientific << chemistryhsSource[celli]*mesh.V()[celli] << tab;
+						}
+					}
+
+					forAll(reactions,m)
+					{ 
+						forAll(mesh.C(),celli)
+						{
+							if(celli == cellID[i])
 							{
-								HRLocal() << "R" << m << "[kg/s]" << tab;        
+								HRLocal() << scientific << SH_[m][celli]*mesh.V()[celli] << tab;
 							}
 						}
 					}
 					HRLocal() << endl;
 				}
-				forAll(mesh.C(),celli)
-				{
-					if(celli == cellID[i])
-					{
-						HRLocal() << scientific << chemistryhsSource[celli]*mesh.V()[celli] << tab;
-					}
-				}
-
-				forAll(reactions,m)
-				{ 
-					forAll(mesh.C(),celli)
-					{
-						if(celli == cellID[i])
-						{
-							HRLocal() << scientific << SH_[m][celli]*mesh.V()[celli] << tab;
-						}
-					}
-				}
-				HRLocal() << endl;
 			}
 		}
 

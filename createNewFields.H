@@ -2,12 +2,11 @@
 label N = Y.size();
 label M = reactions.size();
 label NM = N*M; 
-labelList indexStart(M,0);
 
 
 PtrList<volScalarField> RR_(NM);//reaction rate for species n in reaction m
-PtrList<volScalarField> SH_(NM);//enthorpy source in each reaction
-PtrList<volScalarField> rr_(NM);//species consumption for each species, calculated from chemistry model rr_[i] = chemistry.RR(i);
+PtrList<volScalarField> SH_(M);//enthorpy source in each reaction
+PtrList<volScalarField> rr_(N);//species consumption for each species, calculated from chemistry model rr_[i] = chemistry.RR(i);
 
 PtrList<dimensionedScalar> hcSp(N);//The formation enthapy of each species
 forAll(Y, i)
@@ -77,11 +76,11 @@ forAll(reactions,m)
 		{
 			if (n == reactions[m].lhs()[s].index  )
 			{
-				label I = m*(n-1)+n;
+				label II = N*m + n;
 				word name( Y[n].name() + "_R" +Foam::name(m));
 				RR_.set
 				(
-					I,
+					II,
 					new volScalarField
 					(
 						IOobject
@@ -103,11 +102,11 @@ forAll(reactions,m)
 		{
 			if (n == reactions[m].rhs()[s].index )
 			{
-				label I = m*(n-1)+n;
+				label II = N*m + n;
 				word name( Y[n].name() + "_R" +Foam::name(m));
 				RR_.set
 				(
-					I,
+					II,
 					new volScalarField
 					(
 						IOobject
