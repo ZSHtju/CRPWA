@@ -22,7 +22,7 @@ License
     along with OpenFOAM.  If not, see <http://www.gnu.org/licenses/>.
 
 Application
-    chemical reaction path way analyze
+    Instaneous chemical reaction path way analyze
 
 Description
 	Shenghui Zhong
@@ -48,9 +48,16 @@ int main(int argc, char *argv[])
 	timeSelector::addOptions();
 	argList::addOption
 	(
-		"species",
+		"reactionRateSpecies",
 		"list",
-		"specify a list of species to be processed, e.g. '( O2 CH4 H2)' -"
+		"specify a list of species to be processed with reaction rate, e.g. '( O2 CH4 H2)' -"
+		"otherwise all species will be processed"
+	);
+	argList::addOption
+	(
+		"pathFluxSpecies",
+		"list",
+		"specify a list of species to be processed with path flux analysis, e.g. '( O2 CH4 H2)' -"
 		"otherwise all species will be processed"
 	);
 	argList::addBoolOption
@@ -58,25 +65,73 @@ int main(int argc, char *argv[])
 		"noElementaryReaction",
 		"No output for elementary reaction information, only species reaction rate"
 	);
+	argList::addOption
+	(
+		"positions",
+		"vectorList" ,
+		"path flux position by specified <vectorList> - eg, '((1 0 0)(2 0 0))' "
+	);
 	
     #include "addRegionOption.H"
     #include "setRootCase.H"
     #include "createTime.H"
-
-	HashSet<word> selectedSpecies;
-	if(args.optionFound("species"))
+	List<vector> positions;
+	HashSet<word> reactionRateSpecies;
+	HashSet<word> pathFluxSpecies;
+	if(args.optionFound("positions"))
 	{
-		args.optionLookup("species" )() >> selectedSpecies;
+		args.optionLookup("positions" )() >> positions;
+	}
+	if(args.optionFound("reactionRateSpecies"))
+	{
+		args.optionLookup("reactionRateSpecies" )() >> reactionRateSpecies;
+	}
+	if(args.optionFound("pathFluxSpecies"))
+	{
+		args.optionLookup("pathFluxSpecies" )() >> pathFluxSpecies;
 	}
 	const bool noElementaryReaction = args.optionFound("noElementaryReaction");
     instantList timeDirs = timeSelector::select0(runTime, args);
 	#include "postProcess.H"
+	// output the average heat release rate of each elementary reaction
+	OFstream  HRROutput( "log.Reactions");
+	OFstream  HRROutputNormalized( "log.ReactionsNormalized");
+	//
+	label timeIndex = 0;
 	forAll(timeDirs, timeI)
 	{
 		#include "createMesh.H"
 		#include "createFields.H"
 		#include "createNewFields.H"
-
+		timeIndex++;
+		
+		labelList cellID;
+		if(args.optionFound("positions"))
+		{
+			cellID.setSize(positions.size(),0);
+			forAll(positions,i)
+			{
+				cellID[i] = mesh.findCell(positions[i]);
+			}
+		}
+	
+		if(timeIndex == 1)
+		{
+			HRROutput << "Time [s or CA]" << tab << "HRTotal [J/s]" << tab; 
+			forAll(reactions,m)
+			{
+				HRROutput << "R" << m << "[J/s]" << tab;
+			}
+			HRROutput << endl;
+			
+			HRROutputNormalized << "Time [s or CA]" << tab << "HRTotal" << tab; 
+			forAll(reactions,m)
+			{
+				HRROutputNormalized << "R" << m << tab;
+			}
+			HRROutputNormalized << endl;
+		}
+		
 		volScalarField chemistryhsSource
 		(
 			IOobject
@@ -98,8 +153,8 @@ int main(int argc, char *argv[])
 		chemistryhsSource.write();
 		forAll(Y,i)
 		{
-			rr_[i] = chemistry.RR(i);
-			if(selectedSpecies.found(Y[i].name()) || !args.optionFound("species"))
+			rr_[i].ref() = chemistry.RR(i);
+			if(reactionRateSpecies.found(Y[i].name()) || !args.optionFound("reactionRateSpecies"))
 			{
 				rr_[i].write();
 			}
@@ -115,7 +170,6 @@ int main(int argc, char *argv[])
 			const Reaction<gasHThermoPhysics>& R = reactions[m];
 			forAll(mesh.C(),celli)
 			{
-				label II = indexStart[m];
 				scalar pf,cf,pr,cr;
 				label lRef,rRef;
 				scalar Ti = thermo.T()()[celli];
@@ -126,19 +180,18 @@ int main(int argc, char *argv[])
 				{
 					c[i] = rhoi*Y[i][celli]/specieData[i].W();
 				}
-				scalar omegai = R.omega(pi,Ti,c,pf,cf,lRef,pr,cr,rRef);
+				scalar omegai = R.omega(pi,Ti,c,pf,cf,lRef,pr,cr,rRef);// get the instantaneous reaction rates
 	
-				//const DimensionedField<scalar, volMesh> TTT =  chemistry.calculateRR(m,0);
 				forAll(Y,n)
 				{ 
-					if(selectedSpecies.found(Y[n].name()) || !args.optionFound("species"))
+					if(reactionRateSpecies.found(Y[n].name()) || !args.optionFound("reactionRateSpecies"))
 					{
 						forAll(R.lhs(),s)
 						{
 							if (n == R.lhs()[s].index  )
 							{
-								II++;
-								RR_[II][celli] =  omegai*R.lhs()[s].stoichCoeff*specieData[n].W();   
+								label II = m*(n-1)+n;
+								RR_[II][celli] -=  omegai*R.lhs()[s].stoichCoeff*specieData[n].W();   
 								SH_[m][celli] -= RR_[II][celli]*hcSp[n].value();
 							}
 						}
@@ -147,8 +200,8 @@ int main(int argc, char *argv[])
 						{
 							if (n == R.rhs()[s].index )
 							{
-								II++;
-								RR_[II][celli] =  omegai*R.rhs()[s].stoichCoeff*specieData[n].W();   
+								label II = m*(n-1)+n;
+								RR_[II][celli] +=  omegai*R.rhs()[s].stoichCoeff*specieData[n].W();   
 								SH_[m][celli] -= RR_[II][celli]*hcSp[n].value();
 							}
 						}
@@ -156,21 +209,194 @@ int main(int argc, char *argv[])
 				}
 			}
 		}
+		// species path flux analysis	
+				//***********************************************// 
+		// global
+		forAll(Y,n)
+		{   
+			if(pathFluxSpecies.found(Y[n].name()) || !args.optionFound("pathFluxSpecies"))
+			{
+				autoPtr<OFstream> speciesRRGlobal;
+				autoPtr<OFstream> speciesRRLocal;
+				if (speciesRRGlobal.empty())
+				{
+					// File update
+					//fileName output;
+					//word name_ = "speciesNamePtr";
 
-		//II = 0;
+					// Open new file at start up
+					speciesRRGlobal.reset(new OFstream("log.pathFlux_"+Y[n].name()));	 
+				}
+				if(timeIndex == 1)
+				{
+					speciesRRGlobal() << Y[n].name() << tab; 
+					forAll(reactions,m)
+					{ 
+						const Reaction<gasHThermoPhysics>& R = reactions[m];
+						forAll(R.lhs(),s)
+						{
+							if (n == R.lhs()[s].index  )
+							{
+								speciesRRGlobal() << "R" << m << "[kg/s]" << tab;
+							}
+						}
+
+						forAll(R.rhs(),s)
+						{
+							if (n == R.rhs()[s].index )
+							{
+								speciesRRGlobal() << "R" << m << "[kg/s]" << tab;        
+							}
+						}
+					}
+					speciesRRGlobal() << endl;
+				}
+				scalar volIntegrateRRi = 0.0;
+				forAll(mesh.C(),celli)
+				{
+					volIntegrateRRi += rr_[n][celli]*mesh.V()[celli];
+				}
+				speciesRRGlobal() << scientific << volIntegrateRRi << tab;
+				forAll(reactions,m)
+				{ 
+					const Reaction<gasHThermoPhysics>& R = reactions[m];
+					forAll(R.lhs(),s)
+					{
+						if (n == R.lhs()[s].index  )
+						{
+							label II = m*(n-1)+n;
+							scalar volIntegrateRR = 0.0;
+							forAll(mesh.C(),celli)
+							{
+								volIntegrateRR += RR_[II][celli]*mesh.V()[celli];
+							}
+							speciesRRGlobal() << scientific << volIntegrateRR << tab;
+						}
+					}
+
+					forAll(R.rhs(),s)
+					{
+						if (n == R.rhs()[s].index )
+						{
+							label II = m*(n-1)+n;
+							scalar volIntegrateRR = 0.0;
+							forAll(mesh.C(),celli)
+							{
+								volIntegrateRR += RR_[II][celli]*mesh.V()[celli];
+							}
+							speciesRRGlobal() << scientific << volIntegrateRR << tab;   
+						}
+					}
+				}
+				speciesRRGlobal() << endl;
+			}
+		}
+		//local 
+		forAll(Y,n)
+		{   
+			if(pathFluxSpecies.found(Y[n].name()) || !args.optionFound("pathFluxSpecies"))
+			{
+				forAll(cellID,i)
+				{
+					autoPtr<OFstream> speciesRRLocal;
+					if (speciesRRLocal.empty())
+					{
+						// File update
+						//fileName output;
+						//word name_ = "speciesNamePtr";
+
+						// Open new file at start up
+						speciesRRLocal.reset(new OFstream("log.pathFlux_"+Y[n].name()+"_"+Foam::name(positions[i])));	 
+					}
+					if(timeIndex == 1)
+					{
+						speciesRRLocal() << Y[n].name() << tab; 
+						forAll(reactions,m)
+						{ 
+							const Reaction<gasHThermoPhysics>& R = reactions[m];
+							forAll(R.lhs(),s)
+							{
+								if (n == R.lhs()[s].index  )
+								{
+									speciesRRLocal() << "R" << m << "[kg/s]" << tab;
+								}
+							}
+
+							forAll(R.rhs(),s)
+							{
+								if (n == R.rhs()[s].index )
+								{
+									speciesRRLocal() << "R" << m << "[kg/s]" << tab;        
+								}
+							}
+						}
+						speciesRRLocal() << endl;
+					}
+					forAll(mesh.C(),celli)
+					{
+						if(celli == cellID[i])
+						{
+							speciesRRLocal() << scientific << rr_[n][celli]*mesh.V()[celli] << tab;
+						}
+					}
+
+					forAll(reactions,m)
+					{ 
+						const Reaction<gasHThermoPhysics>& R = reactions[m];
+						forAll(R.lhs(),s)
+						{
+							if (n == R.lhs()[s].index  )
+							{
+								label II = m*(n-1)+n;
+								forAll(mesh.C(),celli)
+								{
+									if(celli == cellID[i])
+									{
+										speciesRRLocal() << scientific << RR_[II][celli]*mesh.V()[celli] << tab;
+									}
+								}
+							}
+						}
+
+						forAll(R.rhs(),s)
+						{
+							if (n == R.rhs()[s].index )
+							{
+								label II = m*(n-1)+n;
+								forAll(mesh.C(),celli)
+								{
+									if(celli == cellID[i])
+									{
+										speciesRRLocal() << scientific << RR_[II][celli]*mesh.V()[celli] << tab;
+									}
+								}
+							}
+						}
+					}
+					speciesRRLocal() << endl;
+				}
+			}
+		}
+		//global
+		scalar volIntegrateChemistryhsSource = 0.0;
+		forAll(mesh.C(), celli)
+		{
+			volIntegrateChemistryhsSource += chemistryhsSource[celli]*mesh.V()[celli];
+		}
+		HRROutput << runTime.timeName() << tab << scientific << volIntegrateChemistryhsSource << tab;
+		HRROutputNormalized << runTime.timeName() << tab << scientific << volIntegrateChemistryhsSource/(volIntegrateChemistryhsSource+SMALL) << tab;
 		forAll(reactions,m)
 		{   
-			label II = indexStart[m];
 			const Reaction<gasHThermoPhysics>& R = reactions[m];	
 			forAll(Y,n)
 			{ 
-				if(selectedSpecies.found(Y[n].name()) || !args.optionFound("species"))
+				if(reactionRateSpecies.found(Y[n].name()) || !args.optionFound("reactionRateSpecies"))
 				{
 					forAll(R.lhs(),s)
 					{
 						if (n == R.lhs()[s].index  )
 						{
-							II++;
+							label II = m*(n-1)+n;
 							RR_[II].write();
 						}
 					}
@@ -179,7 +405,7 @@ int main(int argc, char *argv[])
 					{
 						if (n == R.rhs()[s].index )
 						{
-							II++;
+							label II = m*(n-1)+n;
 							RR_[II].write();  
 						}
 					}
@@ -189,26 +415,92 @@ int main(int argc, char *argv[])
 			{
 				SH_[m].write();
 			}
+			scalar volIntegrateSH = 0.0;
+			forAll(mesh.C(), celli)
+			{
+				volIntegrateSH += SH_[m][celli]*mesh.V()[celli];
+			}			
+			HRROutput << scientific << volIntegrateSH << tab; 
+			HRROutputNormalized << scientific << volIntegrateSH/(volIntegrateChemistryhsSource+SMALL) << tab; 
 		}
+		HRROutput << endl;
+		HRROutputNormalized << endl;
 
+		//local
+		forAll(Y,n)
+		{   
+			forAll(cellID,i)
+			{
+				autoPtr<OFstream> HRLocal;
+				if (HRLocal.empty())
+				{
+					// File update
+					//fileName output;
+					//word name_ = "speciesNamePtr";
 
+					// Open new file at start up
+					HRLocal.reset(new OFstream("log.Reactions_"+Foam::name(positions[i])));	 
+				}
+				if(timeIndex == 1)
+				{
+					forAll(reactions,m)
+					{ 
+						const Reaction<gasHThermoPhysics>& R = reactions[m];
+						forAll(R.lhs(),s)
+						{
+							if (n == R.lhs()[s].index  )
+							{
+								HRLocal() << "R" << m << "[kg/s]" << tab;
+							}
+						}
 
+						forAll(R.rhs(),s)
+						{
+							if (n == R.rhs()[s].index )
+							{
+								HRLocal() << "R" << m << "[kg/s]" << tab;        
+							}
+						}
+					}
+					HRLocal() << endl;
+				}
+				forAll(mesh.C(),celli)
+				{
+					if(celli == cellID[i])
+					{
+						HRLocal() << scientific << chemistryhsSource[celli]*mesh.V()[celli] << tab;
+					}
+				}
+
+				forAll(reactions,m)
+				{ 
+					forAll(mesh.C(),celli)
+					{
+						if(celli == cellID[i])
+						{
+							HRLocal() << scientific << SH_[m][celli]*mesh.V()[celli] << tab;
+						}
+					}
+				}
+				HRLocal() << endl;
+			}
+		}
 
 
 		//***********************************************//
 		forAll(Y,n)
 		{   
-			if(selectedSpecies.found(Y[n].name()) || !args.optionFound("species"))
+			if(reactionRateSpecies.found(Y[n].name()) || !args.optionFound("reactionRateSpecies") || pathFluxSpecies.found(Y[n].name()) || !args.optionFound("pathFluxSpecies"))
 			{
-				autoPtr<OFstream> speciesNamePtr;
-				if (speciesNamePtr.empty())
+				autoPtr<OFstream> speciesInReaction;
+				if (speciesInReaction.empty())
 				{
 					// File update
-					fileName output;
-					word name_ = "speciesNamePtr";
+					//fileName output;
+					//word name_ = "speciesNamePtr";
 
 					// Open new file at start up
-					speciesNamePtr.reset(new OFstream(Y[n].name()));	 
+					speciesInReaction.reset(new OFstream(Y[n].name()));	 
 				}
 
 				forAll(reactions,m)
@@ -236,7 +528,7 @@ int main(int argc, char *argv[])
 
 					if (countl != 0 || countr != 0)
 					{
-						speciesNamePtr() << m << tab << reactions[m] << endl;
+						speciesInReaction() << m << tab << reactions[m] << endl;
 					}
 				}
 			}
